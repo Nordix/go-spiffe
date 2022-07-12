@@ -26,23 +26,19 @@ func HookTLSClientConfig(config *tls.Config, bundle x509bundle.Source, authorize
 	config.VerifyPeerCertificate = WrapVerifyPeerCertificate(config.VerifyPeerCertificate, bundle, authorizer, opts...)
 }
 
-// A Option changes the defaults used to by mTLS ClientConfig functions.
-type Option interface {
-	apply(*options)
+type Option func(*Options)
+
+type Options struct {
+	Trace     Trace
+	TlsConfig *tls.Config
 }
 
-type option func(*options)
-
-func (fn option) apply(o *options) { fn(o) }
-
-type options struct {
-	trace Trace
-}
-
-func newOptions(opts []Option) *options {
-	out := &options{}
+func applyOptions(opts []Option) *Options {
+	out := &Options{
+		TlsConfig: new(tls.Config),
+	}
 	for _, opt := range opts {
-		opt.apply(out)
+		opt(out)
 	}
 	return out
 }
@@ -50,15 +46,16 @@ func newOptions(opts []Option) *options {
 // WithTrace will use the provided tracing callbacks
 // when various TLS config functions gets invoked.
 func WithTrace(trace Trace) Option {
-	return option(func(opts *options) {
-		opts.trace = trace
-	})
+	return func(opts *Options) {
+		opts.Trace = trace
+	}
 }
 
 // MTLSClientConfig returns a TLS configuration which presents an X509-SVID
 // to the server and verifies and authorizes the server X509-SVID.
 func MTLSClientConfig(svid x509svid.Source, bundle x509bundle.Source, authorizer Authorizer, opts ...Option) *tls.Config {
-	config := new(tls.Config)
+	opt := applyOptions(opts)
+	config := opt.TlsConfig
 	HookMTLSClientConfig(config, svid, bundle, authorizer, opts...)
 	return config
 }
@@ -78,7 +75,8 @@ func HookMTLSClientConfig(config *tls.Config, svid x509svid.Source, bundle x509b
 // to the server and verifies the server certificate using provided roots (or
 // the system roots if nil).
 func MTLSWebClientConfig(svid x509svid.Source, roots *x509.CertPool, opts ...Option) *tls.Config {
-	config := new(tls.Config)
+	opt := applyOptions(opts)
+	config := opt.TlsConfig
 	HookMTLSWebClientConfig(config, svid, roots, opts...)
 	return config
 }
@@ -95,7 +93,8 @@ func HookMTLSWebClientConfig(config *tls.Config, svid x509svid.Source, roots *x5
 // TLSServerConfig returns a TLS configuration which presents an X509-SVID
 // to the client and does not require or verify client certificates.
 func TLSServerConfig(svid x509svid.Source, opts ...Option) *tls.Config {
-	config := new(tls.Config)
+	opt := applyOptions(opts)
+	config := opt.TlsConfig
 	HookTLSServerConfig(config, svid, opts...)
 	return config
 }
@@ -110,7 +109,8 @@ func HookTLSServerConfig(config *tls.Config, svid x509svid.Source, opts ...Optio
 // MTLSServerConfig returns a TLS configuration which presents an X509-SVID
 // to the client and requires, verifies, and authorizes client X509-SVIDs.
 func MTLSServerConfig(svid x509svid.Source, bundle x509bundle.Source, authorizer Authorizer, opts ...Option) *tls.Config {
-	config := new(tls.Config)
+	opt := applyOptions(opts)
+	config := opt.TlsConfig
 	HookMTLSServerConfig(config, svid, bundle, authorizer, opts...)
 	return config
 }
@@ -131,7 +131,8 @@ func HookMTLSServerConfig(config *tls.Config, svid x509svid.Source, bundle x509b
 // server certificate to the client and requires, verifies, and authorizes
 // client X509-SVIDs.
 func MTLSWebServerConfig(cert *tls.Certificate, bundle x509bundle.Source, authorizer Authorizer, opts ...Option) *tls.Config {
-	config := new(tls.Config)
+	opt := applyOptions(opts)
+	config := opt.TlsConfig
 	HookMTLSWebServerConfig(config, cert, bundle, authorizer, opts...)
 	return config
 }
@@ -151,9 +152,9 @@ func HookMTLSWebServerConfig(config *tls.Config, cert *tls.Certificate, bundle x
 // GetCertificate returns a GetCertificate callback for tls.Config. It uses the
 // given X509-SVID getter to obtain a server X509-SVID for the TLS handshake.
 func GetCertificate(svid x509svid.Source, opts ...Option) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	opt := newOptions(opts)
+	opt := applyOptions(opts)
 	return func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		return getTLSCertificate(svid, opt.trace)
+		return getTLSCertificate(svid, opt.Trace)
 	}
 }
 
@@ -161,9 +162,9 @@ func GetCertificate(svid x509svid.Source, opts ...Option) func(*tls.ClientHelloI
 // It uses the given X509-SVID getter to obtain a client X509-SVID for the TLS
 // handshake.
 func GetClientCertificate(svid x509svid.Source, opts ...Option) func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	opt := newOptions(opts)
+	opt := applyOptions(opts)
 	return func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-		return getTLSCertificate(svid, opt.trace)
+		return getTLSCertificate(svid, opt.Trace)
 	}
 }
 
